@@ -12,6 +12,30 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "accessibility_sidebar",
+          "title": "Accessibility Sidebar",
+          "icon": "resources/accessibility-sidebar.png"
+        }
+      ]
+    },
+    "views": {
+      "accessibility_sidebar": [
+        {
+          "id": "view-documentation",
+          "name": "Documentation"
+        },
+        {
+          "id": "view-analysis",
+          "name": "Analysis"
+        }
+      ]
+    },
+  
+
     "commands": [
       {
         "command": "accessibility-assistant.helloWorld",
