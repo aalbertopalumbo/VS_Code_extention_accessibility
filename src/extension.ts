@@ -1,5 +1,6 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 
@@ -22,44 +23,30 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [this._extensionUri]
 		};
 
-		webviewView.webview.html = this.getWebviewContent(webviewView.webview);
+		const styleUri = webviewView.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'css', 'styles.css'));
+
+
+		webviewView.webview.html = this.getWebviewContent(webviewView.webview, styleUri);
 		console.log('Documentation view resolved');
 	}
 
-	private getWebviewContent(webview: vscode.Webview): string {
+	private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri): string {
 	
 	return `<!DOCTYPE html>
 	<html lang="en">
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<style>
-			* {
-				margin: 0;
-				padding: 0;
-				box-sizing: border-box;
-			}
-			body {
-				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-				padding: 20px;
-				line-height: 1.6;
-				color: var(--vscode-foreground);
-				background-color: var(--vscode-editor-background);
-			}
-			h1 {
-				color: var(--vscode-textLink-foreground);
-				margin-bottom: 15px;
-				font-size: 24px;
-			}
-			p {
-				margin-bottom: 12px;
-				font-size: 14px;
-			}
-		</style>
+		<link rel="stylesheet" href="${styleUri}">
+		<title>Documentation</title>
 	</head>
 
+
 	<body>
+	<div class ="container">
+		<h1>Documentation</h1>
 		<p> Insert documentation here </p>
+		</div>
 	</body>
 
 	</html>`;
@@ -84,22 +71,28 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [this._extensionUri]
 		};
 
-		webviewView.webview.html = this.getWebviewContent(webviewView.webview);
+		const styleUri = webviewView.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'css', 'styles.css'));
+
+		webviewView.webview.html = this.getWebviewContent(webviewView.webview, styleUri);
 		console.log('Analysis view resolved');
 	}
 
-	private getWebviewContent(webview: vscode.Webview): string {
+	private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri): string {
 	
 	return `<!DOCTYPE html>
 	<html lang="en">
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="stylesheet" href="${styleUri}">
+		<title>Analysis</title>
 	</head>
 
 	<body>
+	<div class ="container">
 		<h1>Analysis</h1>
 		<p>Code analysis tools and results will appear here.</p>
+	</div>
 	</body>
 
 	</html>`;
@@ -145,11 +138,16 @@ export function activate(context: vscode.ExtensionContext) {
 			'Accessibility Assistant', // Title of the panel displayed to the user
 			vscode.ViewColumn.One, // Editor column to show the new webview panel in.
 			{
-				enableScripts: true // Enable scripts in the webview
+				enableScripts: true, // Enable scripts in the webview
+				localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'css')] // Restrict the webview to only load resources from the `css` directory
 			}
 		);
+
+		//
+		const onDiskPath = vscode.Uri.file(path.join(context.extensionPath, 'css', 'styles.css'));
+		const cssUri = panel.webview.asWebviewUri(onDiskPath);
 		
-		panel.webview.html = getWebviewContent();
+		panel.webview.html = getWebviewContent(cssUri);
 	});
 
 
@@ -159,28 +157,14 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Extension activation complete');
 }
 
-function getWebviewContent() {
+function getWebviewContent(cssUri: vscode.Uri) {
 	return `<!DOCTYPE html>
 	<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            padding: 20px;
-            line-height: 1.6;
-            color: var(--vscode-foreground);
-            background-color: var(--vscode-editor-background);
-        }
-        h1 {
-            color: var(--vscode-textLink-foreground);
-            margin-bottom: 15px;
-        }
-        p {
-            margin-bottom: 10px;
-        }
-    </style>
+    <link rel="stylesheet" href="${cssUri}">
+	<title>Accessibility Assistant</title>
 </head>
 
 <body>
