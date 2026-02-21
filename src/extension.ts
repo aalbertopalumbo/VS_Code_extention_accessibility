@@ -2,7 +2,8 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as path from 'path';
 import * as vscode from 'vscode';
-
+import * as fs from 'fs';
+// Import marked for markdown parsing
 
 // WEBVIEW PROVIDER FOR DOCUMENTATION VIEW
 class DocumentationViewProvider implements vscode.WebviewViewProvider {
@@ -13,7 +14,8 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 		console.log('DocumentationViewProvider initialized with extension URI:');
 	}
 
-	public resolveWebviewView(
+	// This method is called when the webview view is resolved
+	public async resolveWebviewView(
 		webviewView: vscode.WebviewView,
 		_context: vscode.WebviewViewResolveContext,
 		_token: vscode.CancellationToken
@@ -23,14 +25,21 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [this._extensionUri]
 		};
 
+		// get the path to the CSS file and the markdown documentation
 		const styleUri = webviewView.webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'css', 'styles.css'));
+		const docPath = vscode.Uri.joinPath(this._extensionUri, 'css', 'Web_Design_guidelines.md');
+
+		// read the markdown file and convert it to HTML
+		const markdownContent = fs.readFileSync(docPath.fsPath, 'utf-8');
+		const { marked } = await import('marked');
+		const htmlContent = marked.parse(markdownContent);
 
 
-		webviewView.webview.html = this.getWebviewContent(webviewView.webview, styleUri);
+		webviewView.webview.html = this.getWebviewContent(webviewView.webview, styleUri, htmlContent as string);
 		console.log('Documentation view resolved');
 	}
 
-	private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri): string {
+	private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri, htmlContent: string): string {
 	
 	return `<!DOCTYPE html>
 	<html lang="en">
@@ -45,8 +54,10 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 	<body>
 	<div class ="container">
 		<h1>Documentation</h1>
-		<p> Insert documentation here </p>
+		<div id="guidelines-content">
+			${htmlContent}
 		</div>
+	</div>
 	</body>
 
 	</html>`;
