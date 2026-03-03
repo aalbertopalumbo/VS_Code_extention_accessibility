@@ -13,7 +13,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'documentation';
 
 	constructor(private readonly _extensionUri: vscode.Uri) {
-		console.log('DocumentationViewProvider initialized with extension URI:');
+		console.log('DocumentationViewProvider initialized with extension URI:'); //DEBUG
 	}
 
 	// This method is called when the webview view is resolved
@@ -79,49 +79,68 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
 	private async runGeminiAnalysis(webview: vscode.Webview) {
 		const apiKey = process.env.GEMINI_API_KEY;
-		if (!apiKey) {
-			vscode.window.showErrorMessage('Gemini API key is not set. Please add it to your .env file.');
-			return;
-		}
-	
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-    		webview.postMessage({ command: 'analysisError', error: 'No file open to analyse.' });
-    		return;
-		}
-		const code = editor.document.getText();
+    if (!apiKey) {
+        vscode.window.showErrorMessage('Gemini API key is not set. Please add it to your .env file.');
+        return;
+    }
 
-		const docPath = vscode.Uri.joinPath(this._extensionUri, 'css', 'Web_Design_guidelines.md');
-		const documentation = fs.readFileSync(docPath.fsPath, 'utf-8');
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        webview.postMessage({ command: 'analysisError', error: 'No file open to analyse.' });
+        return;
+    }
+    const code = editor.document.getText();
 
-		try {
-   			const { GoogleGenAI } = await import('@google/genai');
-    		const genAI = new GoogleGenAI({ apiKey });
+    const docPath = vscode.Uri.joinPath(this._extensionUri, 'css', 'Web_Design_guidelines.md');
+    const documentation = fs.readFileSync(docPath.fsPath, 'utf-8');
 
-			const response = await genAI.models.generateContent({
-			model: 'gemini-3-flash-preview',
-			contents: `You are an expert code assistant specialized in conversational web browsing. 
+    try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const genAI = new GoogleGenAI({ apiKey });
+
+        const response = await genAI.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `You are an expert code assistant specialized in conversational web browsing.
 			You provide your suggestions based on the documentation provided and nothing else. You generate the analysis based on this format:
 			1. Title of the guideline violated
 			2. Rationale: explain why you are proposing this suggestion based on the guidelines present in the documentation
 			3. Suggestion: shown in a diff format
 
-			Here is the documentation:
+			IMPORTANT: Respond with ONLY a valid JSON array — no markdown, no explanation, no code fences.
+			Each element must follow this exact schema:
+			{
+  				"title": "<title of the guideline violated>",
+  				"rationale": "<why this code violates the guideline>",
+  				"original": "<the exact lines of code containing the violation>",
+  				"suggested": "<the corrected version of those lines>"
+			}
+
+			If no violations are found, return an empty array: []
+
+			=== DOCUMENTATION ===
 			${documentation}
 
-			Here is the code to analyse:
+			=== CODE TO ANALYSE ===
 			${code}`
-			});
+        	});
 
-    	const text = response.text || '';
-    	webview.postMessage({ command: 'analysisResult', result: text });
+        	const text = (response.text || '').trim();  									//trim removes spaces and useless newlines. || '' is a precaution in case response.text==null
+        	const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();   //replaces '''json and ''', trim for safety 
 
-		} catch (err: any) {
-    		webview.postMessage({ command: 'analysisError', error: err.message });
+        	let violations = [];
+        	try {
+            	violations = JSON.parse(clean);
+            	if (!Array.isArray(violations)) { violations = []; }
+        	} catch {
+            	webview.postMessage({ command: 'analysisError', error: 'Could not parse Gemini response.' });
+            	return;
+        	}
+
+        	webview.postMessage({ command: 'analysisResult', violations });
+    		} catch (err: any) {
+        		webview.postMessage({ command: 'analysisError', error: err.message });
+    		}
 		}
-		
-
-	}
 
 	public resolveWebviewView(
 		webviewView: vscode.WebviewView,
@@ -169,25 +188,60 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     </div>
 
     <script>
-        const vscode = acquireVsCodeApi();
+    const vscode = acquireVsCodeApi();
 
-        document.getElementById('run-analysis').addEventListener('click', () => {
-            document.getElementById('status').textContent = 'Analysing...';
-            document.getElementById('results').textContent = '';
-            vscode.postMessage({ command: 'runAnalysis' });
-        });
+    document.getElementById('run-analysis').addEventListener('click', () => {
+        document.getElementById('status').textContent = 'Running analysis, please wait...';
+        document.getElementById('results').innerHTML = '';
+        vscode.postMessage({ command: 'runAnalysis' });
+    });
 
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'analysisResult') {
-                document.getElementById('status').textContent = '';
-                document.getElementById('results').textContent = message.result;
-            } else if (message.command === 'analysisError') {
-                document.getElementById('status').textContent = '';
-                document.getElementById('results').textContent = 'Error: ' + message.error;
+    window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.command === 'analysisResult') {
+            document.getElementById('status').textContent = '';
+            const results = document.getElementById('results');
+
+            if (!message.violations || message.violations.length === 0) {  //if the message doesn't contain any violations or the size is zero
+                results.innerHTML = '<p>No violations found!</p>';
+                return;
             }
-        });
-    </script>
+
+            message.violations.forEach(v => {   //Build a card for each violation
+                const card = document.createElement('div');
+                card.className = 'violation-card';
+
+                const removedLines = v.original.split('\\n')
+                    .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>') //
+                    .join('');
+                const addedLines = v.suggested.split('\\n')
+                    .map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
+                    .join('');
+				//compose each card with title, rationale and diff
+                card.innerHTML =
+                    '<div class="violation-title">' + escHtml(v.title) + '</div>' +
+                    '<div class="violation-label">Rationale</div>' +
+                    '<div class="violation-rationale">' + escHtml(v.rationale) + '</div>' +
+                    '<div class="violation-label">Suggestion</div>' +
+                    '<div class="diff-block">' + removedLines + addedLines + '</div>';
+
+                results.appendChild(card);
+            });
+
+        } else if (message.command === 'analysisError') {
+            document.getElementById('status').textContent = '';
+            document.getElementById('results').textContent = 'Error: ' + message.error;
+        }
+    });
+
+    function escHtml(str) { //useful in order to substitute special characters into their safe equivalents
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+</script>
     </body>
     </html>`;
 	

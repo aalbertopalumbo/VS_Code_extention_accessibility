@@ -56,3 +56,54 @@ button:focus {
     font-size: 14px;
     color: #e7c4c4;
 }
+
+.violation-card {
+    border: 1px solid #444;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    padding: 12px;
+}
+
+.violation-title {
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: #fafafa;
+}
+
+.violation-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #aaaaaa;
+    margin-bottom: 2px;
+}
+
+.violation-rationale {
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    color: #e7c4c4;
+}
+
+.diff-block {
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.diff-removed {
+    background: rgba(255, 80, 80, 0.18);
+    color: #f97b7b;
+    padding: 4px 8px;
+    display: block;
+}
+
+.diff-added {
+    background: rgba(80, 200, 80, 0.18);
+    color: #6ddb6d;
+    padding: 4px 8px;
+    display: block;
+}
