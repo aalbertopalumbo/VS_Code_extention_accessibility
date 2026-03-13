@@ -52,7 +52,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
             });
         }
         if (isDetailsHeading) {
-            const titleMatch = token.raw.match(/<h3[^>]*>(.*?)<\/h3>/s); //regex, more info https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions
+            const titleMatch = token.raw.match(/<h3[^>]*>(.*?)<\/h3>/s);//regex, more info https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions
             currentTitle = titleMatch ? titleMatch[1].trim() : 'Guideline';
             currentTokens = [];
         } else {
@@ -185,7 +185,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         	});
 
         	const text = (response.text || '').trim();  									//trim removes spaces and useless newlines. || '' is a precaution in case response.text==null
-        	const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();   //replaces '''json and ''', trim for safety 
+        	const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();   //replaces ```json and ``` (Alt+96), trim for safety 
 
         	let violations = [];
         	try {
@@ -222,6 +222,30 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         	if (message.command === 'runAnalysis') {
             	await this.runGeminiAnalysis(webviewView.webview);
         	}
+			if (message.command === 'acceptSuggestion') {         //Takes the open document in the editor and search "original" with indexOf
+   				const editor = vscode.window.activeTextEditor;
+    			if (!editor) { return; }
+				const document = editor.document;
+    			const fullText = document.getText();
+    			const index = fullText.indexOf(message.original);
+
+    			if (index === -1) {
+        			vscode.window.showErrorMessage('Could not find the original code in the file.');
+        			return;
+    			}
+
+				const startPos = document.positionAt(index);                              //Converts numerical index in a position in the document (line and column)
+				const endPos = document.positionAt(index + message.original.length);
+				const range = new vscode.Range(startPos, endPos);						  //piece of text to substitute
+				const edit = new vscode.WorkspaceEdit();
+				edit.replace(document.uri, range, message.suggested);
+				await vscode.workspace.applyEdit(edit);
+				vscode.window.showInformationMessage('Substitution applied successfully!');
+				//positionAt and getText:  https://code.visualstudio.com/api/references/vscode-api#TextDocument
+				//Range: https://code.visualstudio.com/api/references/vscode-api#Range
+				//WorkspaceEdit and applyEdit: https://code.visualstudio.com/api/references/vscode-api#WorkspaceEdit
+				//querySelector and addEventListener: https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener
+			}
     	});
 
 	}
@@ -272,21 +296,28 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 card.className = 'violation-card';
 
                 const removedLines = v.original.split('\\n')
-                    .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>') //
+                    .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>') 
                     .join('');
                 const addedLines = v.suggested.split('\\n')
                     .map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
                     .join('');
 				//compose each card with title, rationale and diff
                 card.innerHTML =
-                    '<div class="violation-title">' + escHtml(v.title) + '</div>' +
-                    '<div class="violation-label">Rationale</div>' +
-                    '<div class="violation-rationale">' + escHtml(v.rationale) + '</div>' +
-                    '<div class="violation-label">Suggestion</div>' +
-                    '<div class="diff-block">' + removedLines + addedLines + '</div>';
-
-                results.appendChild(card);
-            });
+   			    '<div class="violation-title">' + escHtml(v.title) + '</div>' +
+    		    '<div class="violation-label">Rationale</div>' +
+    			'<div class="violation-rationale">' + escHtml(v.rationale) + '</div>' +
+    			'<div class="violation-label">Suggestion</div>' +
+    			'<div class="diff-block">' + removedLines + addedLines + '</div>' +
+    			'<button class="accept-btn">Accept</button>';												//Button implementation
+				results.appendChild(card);
+				card.querySelector('.accept-btn').addEventListener('click', () => {  						//querySelector finds the button inside each card
+    				vscode.postMessage({																	//sends a message to TypeScript with the command "acceptSuggestion"
+        				command: 'acceptSuggestion',
+        				original: v.original,
+        				suggested: v.suggested
+    				});
+				});
+			}); // chiude il forEach
 
         } else if (message.command === 'analysisError') {
             document.getElementById('status').textContent = '';
@@ -301,9 +332,9 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
     }
-</script>
-    </body>
-    </html>`;
+	</script>
+    	</body>
+    	</html>`;
 	
 	}
 }
@@ -351,7 +382,7 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.ViewColumn.One, // Editor column to show the new webview panel in.
 			{
 				enableScripts: true, // Enable scripts in the webview
-				localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'css')] // Restrict the webview to only load resources from the `css` directory
+				localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'css')] // Restrict the webview to only load resources from the css directory
 			}
 		);
 
