@@ -107,3 +107,72 @@ button:focus {
     padding: 4px 8px;
     display: block;
 }
+
+.guideline-card {
+    border: 1px solid #444;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    padding: 12px;
+}
+
+.guideline-header {
+    font-weight: bold;
+    font-size: 13px;
+    color: #ffffff;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+.guideline-body {
+    font-size: 12px;
+    color: #ffffff;
+    line-height: 1.5;
+}
+
+.guideline-card > .guideline-body details {
+    all: unset;
+}
+
+.guideline-card > .guideline-body summary {
+    display: none;
+}
+
+.guideline-body details {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+}
+
+.guideline-body summary {
+    display: none;
+}
+
+.guideline-body pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+.guideline-body code {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+#search-bar {
+    width: 100%;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background-color: #2d2d2d;
+    color: #ffffff;
+    font-size: 13px;
+    box-sizing: border-box;
+    outline: none;
+}
+
+#search-bar:focus {
+    border-color: #0066cc;
+}
