@@ -12,7 +12,8 @@
   "activationEvents": [
     "onCommand:accessibility-assistant.helloWorld",
     "onView:documentation",
-    "onView:analysis"
+    "onView:analysis",
+    "onView:testing"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -38,6 +39,11 @@
           "id": "analysis",
           "name": "Analysis",
           "icon": "resources/accessibility-icon.png"
+        },
+        { "type": "webview", 
+          "id": "testing", 
+          "name": "Vocal Testing", 
+          "icon": "resources/accessibility-icon.png" 
         }
       ]
     },

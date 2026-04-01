@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import { TestingViewProvider } from './TestingExtension/testingViewProvider';
 // Import marked for markdown parsing
 
 
@@ -486,6 +487,11 @@ export function activate(context: vscode.ExtensionContext) {
 	const analysisProvider = new AnalysisViewProvider(context.extensionUri, context);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(AnalysisViewProvider.viewType, analysisProvider)
+	);
+
+	const testingProvider = new TestingViewProvider(context.extensionUri, context);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(TestingViewProvider.viewType, testingProvider)
 	);
 
 	// The command has been defined in the package.json file
