@@ -13,8 +13,8 @@ export interface HistoryEntry {
     confidence: string;
     htmlSnippet: string;
     botResponse: string;
-    startLine: number;   // 1-based line number where the snippet starts in the HTML file
-    endLine: number;     // 1-based line number where the snippet ends in the HTML file
+    startLine: number;  
+    endLine: number;     
 }
 
 const HISTORY_KEY = 'vocalTesting.history';
