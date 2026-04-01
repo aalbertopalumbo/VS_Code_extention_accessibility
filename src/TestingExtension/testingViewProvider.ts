@@ -3,7 +3,7 @@ import { detectIntent } from './intentDetector';
 import { getHistory, addEntry, clearHistory, HistoryEntry } from './historyManager';
 
 // ---------------------------------------------------------------------------
-// HIGHLIGHT DECORATION (to highlight the HTML snippet in the editor)
+// HIGHLIGHT DECORATION
 // ---------------------------------------------------------------------------
 
 const snippetDecoration = vscode.window.createTextEditorDecorationType({
@@ -13,17 +13,18 @@ const snippetDecoration = vscode.window.createTextEditorDecorationType({
     overviewRulerLane: vscode.OverviewRulerLane.Right,
 });
 
-function highlightSnippet(snippet: string) {
+// Highlights lines in the editor using 1-based line numbers returned by Groq
+function highlightByLines(startLine: number, endLine: number) {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || !snippet) { return; }
+    if (!editor || startLine === 0) { return; }
 
-    const fullText = editor.document.getText();
-    const index = fullText.indexOf(snippet.trim());
-    if (index === -1) { return; }
+    const lastLine = editor.document.lineCount;
+    const safeStart = Math.max(0, startLine - 1);
+    const safeEnd = Math.min(lastLine - 1, endLine - 1);
 
-    const startPos = editor.document.positionAt(index);
-    const endPos = editor.document.positionAt(index + snippet.trim().length);
-    const range = new vscode.Range(startPos, endPos);
+    const start = new vscode.Position(safeStart, 0);
+    const end = new vscode.Position(safeEnd, editor.document.lineAt(safeEnd).text.length);
+    const range = new vscode.Range(start, end);
 
     editor.setDecorations(snippetDecoration, [range]);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
@@ -42,14 +43,11 @@ async function askGroq(
     userMessage: string,
     intent: string,
     htmlCode: string
-): Promise<{ botResponse: string; htmlSnippet: string }> {
+): Promise<{ botResponse: string; htmlSnippet: string; startLine: number; endLine: number }> {
 
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-        return {
-            botResponse: 'Error: Groq API key not found. Please check your .env file.',
-            htmlSnippet: ''
-        };
+        return { botResponse: 'Error: Groq API key not found. Please check your .env file.', htmlSnippet: '', startLine: 0, endLine: 0 };
     }
 
     let intentInstruction = '';
@@ -67,16 +65,28 @@ Find the relevant paragraph, heading, or text element and read it aloud as a voi
 Example: "Reading the first paragraph: Welcome to our website..."`;
     }
 
+    // Number each line so Groq can reference them precisely
+    const numberedHtml = htmlCode
+        .split('\n')
+        .map((line, i) => `${i + 1}: ${line}`)
+        .join('\n');
+
     const systemPrompt = `You are a voice assistant that helps test the vocal interaction of a web page under development.
 You must respond as if you were a screen reader or voice assistant speaking to a blind user.
 
 ${intentInstruction}
 
+CRITICAL INSTRUCTION: You MUST answer in the exact same language as the "User message". If the user asks in Italian, respond completely in Italian.
+
+The HTML code provided has line numbers in the format "N: <code>". Use these line numbers to identify the relevant section.
+
 IMPORTANT: Respond with ONLY a valid JSON object — no markdown, no explanation, no code fences.
 Use this exact schema:
 {
-  "response": "<your voice assistant response to the user>",
-  "snippet": "<the exact portion of HTML code you used to generate the response>"
+  "response": "<your voice assistant response in the user's language>",
+  "snippet": "<the relevant HTML code snippet, copied verbatim from the provided code without the line number prefix>",
+  "startLine": <1-based line number where the relevant section starts>,
+  "endLine": <1-based line number where the relevant section ends>
 }`;
 
     try {
@@ -90,7 +100,7 @@ Use this exact schema:
                 model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: `User message: ${userMessage}\n\nHTML code:\n${htmlCode}` }
+                    { role: 'user', content: `User message: ${userMessage}\n\nHTML code:\n${numberedHtml}` }
                 ],
                 max_tokens: 1024,
                 temperature: 0.2
@@ -101,23 +111,23 @@ Use this exact schema:
         const text = (data.choices?.[0]?.message?.content || '').trim();
         const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
 
-        let parsed: { response: string; snippet: string } = { response: '', snippet: '' };
+        let parsed: { response: string; snippet: string; startLine: number; endLine: number } = 
+            { response: '', snippet: '', startLine: 0, endLine: 0 };
         try {
             parsed = JSON.parse(clean);
         } catch {
-            return { botResponse: text, htmlSnippet: '' };
+            return { botResponse: text, htmlSnippet: '', startLine: 0, endLine: 0 };
         }
 
         return {
             botResponse: parsed.response || '',
-            htmlSnippet: parsed.snippet || ''
+            htmlSnippet: parsed.snippet || '',
+            startLine: parsed.startLine || 0,
+            endLine: parsed.endLine || 0
         };
 
     } catch (err: any) {
-        return {
-            botResponse: `Error calling Groq: ${err.message}`,
-            htmlSnippet: ''
-        };
+        return { botResponse: `Error calling Groq: ${err.message}`, htmlSnippet: '', startLine: 0, endLine: 0 };
     }
 }
 
@@ -163,8 +173,8 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
                 await clearHistory(this._context);
                 webviewView.webview.postMessage({ command: 'historyCleared' });
             }
-            if (message.command === 'highlightSnippet') {
-                highlightSnippet(message.snippet);
+            if (message.command === 'highlightLines') {
+                highlightByLines(message.startLine, message.endLine);
             }
             if (message.command === 'clearHighlight') {
                 clearHighlight();
@@ -193,7 +203,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const { botResponse, htmlSnippet } = await askGroq(
+        const { botResponse, htmlSnippet, startLine, endLine } = await askGroq(
             userMessage,
             intentResult.intent,
             htmlCode
@@ -204,17 +214,16 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             intent: intentResult.intent,
             confidence: intentResult.confidence,
             htmlSnippet,
-            botResponse
+            botResponse,
+            startLine,
+            endLine
         });
 
         webview.postMessage({ command: 'newEntry', entry });
     }
 
     private getWebviewContent(styleUri: vscode.Uri, history: HistoryEntry[]): string {
-        const historyJson = JSON.stringify(history)
-        .replace(/\\/g, '\\\\')
-        .replace(/`/g, '\\`')
-        .replace(/<\/script>/gi, '<\\/script>');
+        const historyJson = JSON.stringify(history).replace(/</g, '\\u003c');
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -228,18 +237,33 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
 
         body { margin: 0; padding: 0; font-family: var(--vscode-font-family); font-size: 13px; color: var(--vscode-foreground); }
 
-        .chat-container { display: flex; flex-direction: column; height: 100vh; padding: 10px; gap: 8px; }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 10px;
+            gap: 8px;
+            overflow: hidden;
+        }
 
         h2 { margin: 0; font-size: 15px; font-weight: 600; padding-bottom: 6px; border-bottom: 1px solid var(--vscode-panel-border); }
 
-        /* ---- ENTRY CARD ---- */
-        .chat-history { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+        .chat-history {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 2px;
+        }
 
         .entry {
             border: 1px solid var(--vscode-panel-border);
             border-radius: 8px;
             overflow: hidden;
             background: var(--vscode-sideBar-background);
+            flex-shrink: 0;
         }
 
         .entry-header {
@@ -256,6 +280,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             font-size: 13px;
             color: var(--vscode-textLink-foreground);
             flex: 1;
+            word-break: break-word;
         }
 
         .intent-badge {
@@ -266,6 +291,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             padding: 2px 8px;
             border-radius: 10px;
             white-space: nowrap;
+            flex-shrink: 0;
         }
         .badge-DESCRIBE { background: #1e4d78; color: #7ec8f7; }
         .badge-NAVIGATE { background: #2d4a1e; color: #8fca6b; }
@@ -275,11 +301,11 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             font-size: 10px;
             color: var(--vscode-descriptionForeground);
             white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .entry-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
-        /* ---- SECTION LABELS ---- */
         .section-label {
             font-size: 10px;
             font-weight: 600;
@@ -289,7 +315,6 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             margin-bottom: 3px;
         }
 
-        /* ---- BOT RESPONSE ---- */
         .bot-response {
             background: var(--vscode-textBlockQuote-background);
             border-left: 3px solid var(--vscode-textLink-foreground);
@@ -297,39 +322,45 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             padding: 8px 10px;
             line-height: 1.6;
             font-size: 13px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
-        /* ---- HTML SNIPPET ---- */
-        .snippet-wrapper { position: relative; }
+        .snippet-wrapper { position: relative; margin-top: 5px; }
 
         .snippet-box {
-            background: var(--vscode-textCodeBlock-background, #1e1e1e);
+            background: var(--vscode-editor-background);
             border: 1px solid var(--vscode-panel-border);
             border-radius: 4px;
-            padding: 8px 10px;
+            padding: 10px;
+            padding-right: 130px;
             font-family: var(--vscode-editor-font-family, monospace);
-            font-size: 11px;
-            line-height: 1.5;
+            font-size: 12px;
+            margin: 0;
             white-space: pre-wrap;
             word-break: break-all;
-            max-height: 140px;
-            overflow-y: auto;
-            color: var(--vscode-editor-foreground, #d4d4d4);
+            overflow-x: hidden;
         }
 
         .highlight-btn {
             position: absolute;
-            top: 4px;
-            right: 4px;
-            font-size: 10px;
-            padding: 2px 7px;
-            background: var(--vscode-button-secondaryBackground, #3a3a3a);
-            color: var(--vscode-button-secondaryForeground, #ccc);
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 4px;
+            top: 5px;
+            right: 5px;
+            padding: 4px 8px;
+            font-size: 11px;
             cursor: pointer;
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+            border: none;
+            border-radius: 3px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            white-space: nowrap;
         }
-        .highlight-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #4a4a4a); }
+        .highlight-btn:hover {
+            opacity: 1;
+            background: var(--vscode-button-secondaryHoverBackground);
+        }
 
         .entry-timestamp {
             font-size: 10px;
@@ -337,8 +368,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             text-align: right;
         }
 
-        /* ---- INPUT AREA ---- */
-        .input-area { display: flex; flex-direction: column; gap: 6px; }
+        .input-area { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
 
         .input-row { display: flex; gap: 6px; }
 
@@ -379,8 +409,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
         }
         #clear-btn:hover { opacity: 1; background: rgba(255,80,80,0.08); }
 
-        /* ---- STATUS / ERROR ---- */
-        #status { min-height: 20px; }
+        #status { flex-shrink: 0; min-height: 20px; }
         .loading { color: var(--vscode-descriptionForeground); font-size: 12px; font-style: italic; }
         .error-msg {
             color: var(--vscode-errorForeground);
@@ -437,8 +466,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
     window.addEventListener('message', event => {
         const msg = event.data;
         statusEl.innerHTML = '';
-
-        if (msg.command === 'newEntry')      { renderEntry(msg.entry); }
+        if (msg.command === 'newEntry')       { renderEntry(msg.entry); }
         if (msg.command === 'historyCleared') { historyEl.innerHTML = ''; }
         if (msg.command === 'error') {
             statusEl.innerHTML = '<div class="error-msg">⚠ ' + escHtml(msg.text) + '</div>';
@@ -449,15 +477,9 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
         const div = document.createElement('div');
         div.className = 'entry';
 
-        // Format bot response: replace ". " with ".\n" for readability
-        const formattedResponse = entry.botResponse
-            .replace(/\. ([A-Z])/g, '.\n$1')
-            .replace(/\. (La |Il |Un |Una |I |Gli |Le |C'è |Ci sono )/g, '.\n$1');
-
-        // Pretty-print the HTML snippet
         const prettySnippet = formatHtml(entry.htmlSnippet || '');
-
         const badgeClass = 'badge-' + entry.intent;
+        const hasLines = entry.startLine && entry.startLine > 0;
 
         div.innerHTML =
             '<div class="entry-header">' +
@@ -468,34 +490,39 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             '<div class="entry-body">' +
                 '<div>' +
                     '<div class="section-label">💬 Chatbot response</div>' +
-                    '<div class="bot-response">' + escHtml(formattedResponse) + '</div>' +
+                    '<div class="bot-response">' + escHtml(entry.botResponse) + '</div>' +
                 '</div>' +
                 '<div>' +
                     '<div class="section-label">🔍 HTML snippet used</div>' +
                     '<div class="snippet-wrapper">' +
                         '<pre class="snippet-box">' + escHtml(prettySnippet || '—') + '</pre>' +
-                        (entry.htmlSnippet
-                            ? '<button class="highlight-btn" data-snippet="' + escAttr(entry.htmlSnippet) + '">Highlight in editor</button>'
+                        (hasLines
+                            ? '<button class="highlight-btn">Highlight in editor</button>'
                             : '') +
                     '</div>' +
                 '</div>' +
                 '<div class="entry-timestamp">' + escHtml(entry.timestamp) + '</div>' +
             '</div>';
 
-        // Highlight button: show snippet in editor on click
-        const btn = div.querySelector('.highlight-btn');
-        if (btn) {
-            btn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'highlightSnippet', snippet: entry.htmlSnippet });
-                setTimeout(() => vscode.postMessage({ command: 'clearHighlight' }), 5000);
-            });
+        // Highlight uses line numbers — reliable regardless of formatting
+        if (hasLines) {
+            const btn = div.querySelector('.highlight-btn');
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    vscode.postMessage({
+                        command: 'highlightLines',
+                        startLine: entry.startLine,
+                        endLine: entry.endLine
+                    });
+                    setTimeout(() => vscode.postMessage({ command: 'clearHighlight' }), 5000);
+                });
+            }
         }
 
         historyEl.appendChild(div);
         historyEl.scrollTop = historyEl.scrollHeight;
     }
 
-    // Basic HTML pretty-printer: adds newlines after tags
     function formatHtml(html) {
         return html
             .replace(/></g, '>\\n<')
@@ -508,12 +535,7 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/\\n/g, '\\n');
-    }
-
-    function escAttr(str) {
-        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            .replace(/"/g, '&quot;');
     }
 </script>
 </body>
