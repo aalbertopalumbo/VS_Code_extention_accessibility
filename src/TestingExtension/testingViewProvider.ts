@@ -102,7 +102,7 @@ Use this exact schema:
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: `User message: ${userMessage}\n\nHTML code:\n${numberedHtml}` }
                 ],
-                max_tokens: 1024,
+                max_tokens: 4096,
                 temperature: 0.2
             })
         });
@@ -490,12 +490,16 @@ export class TestingViewProvider implements vscode.WebviewViewProvider {
                             '<div class="entry-body">' +
                                 '<div>' +
                                     '<div class="section-label">💬 Chatbot response</div>' +
-                                    '<div class="bot-response">' + escHtml(entry.botResponse) + '</div>' +
+                                    (entry.botResponse === ''
+                                        ? '<div class="error-msg">⚠ Nessuna risposta ricevuta. Il file HTML potrebbe essere troppo lungo o la risposta e stata troncata.</div>'
+                                        : entry.botResponse.startsWith('Error')
+                                            ? '<div class="error-msg">⚠ ' + escHtml(entry.botResponse) + '</div>'
+                                            : '<div class="bot-response">' + escHtml(entry.botResponse) + '</div>') +
                                 '</div>' +
                                 '<div>' +
                                     '<div class="section-label">🔍 HTML snippet used</div>' +
                                     '<div class="snippet-wrapper">' +
-                                        '<pre class="snippet-box">' + escHtml(prettySnippet || '—') + '</pre>' +
+                                        '<pre class="snippet-box">' + escHtml(prettySnippet || (entry.botResponse === '' || entry.botResponse.startsWith('Error') ? 'Nessun snippet disponibile.' : '—')) + '</pre>' +
                                         (hasLines
                                             ? '<button class="highlight-btn">Highlight in editor</button>'
                                             : '') +
