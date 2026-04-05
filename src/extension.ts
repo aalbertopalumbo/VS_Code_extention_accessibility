@@ -316,11 +316,19 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
 			// Highlight the original lines red in the editor when the user hovers/clicks a card
 			if (message.command === 'highlightOriginal') {
-				const original = message.original
-				 .replace(/\\n/g, '\n') //replaces \n with real newlines
-				 .replace(/\\t/g, '\t') //replaces \t with real tabs
-				// .replace(/ +/g, ' '); //replaces multiple spaces with a single space (just in case)
+
+				const editor = vscode.window.activeTextEditor;
+				if (!editor) { return; }
+				let original = message.original.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+				const eol = editor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+				original = original.replace(/\r?\n/g, eol);
 				this.highlightOriginal(original);
+
+				// const original = message.original
+				//  .replace(/\\n/g, '\n') //replaces \n with real newlines
+				//  .replace(/\\t/g, '\t') //replaces \t with real tabs
+				// // .replace(/ +/g, ' '); //replaces multiple spaces with a single space (just in case)
+				// this.highlightOriginal(original);
 			}
 
 			if (message.command === 'clearHighlight') {
@@ -335,9 +343,19 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 			if (message.command === 'acceptSuggestion') {         //Takes the open document in the editor and search "original" with indexOf
    				const editor = vscode.window.activeTextEditor;
     			if (!editor) { return; }
+
 				const document = editor.document;
     			const fullText = document.getText();
-    			const index = fullText.indexOf(message.original);
+
+				const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+
+				let searchStringOriginal = message.original.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+				searchStringOriginal = searchStringOriginal.replace(/\r?\n/g, eol);
+
+				let searchStringSuggested = message.suggested.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+				searchStringSuggested = searchStringSuggested.replace(/\r?\n/g, eol);
+				
+    			const index = fullText.indexOf(searchStringOriginal);
 
     			if (index === -1) {
         			vscode.window.showErrorMessage('Could not find the original code in the file.');
@@ -348,14 +366,16 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 				const endPos = document.positionAt(index + message.original.length);
 				const range = new vscode.Range(startPos, endPos);						  //piece of text to substitute
 				const edit = new vscode.WorkspaceEdit();
-				edit.replace(document.uri, range, message.suggested);
+
+				edit.replace(document.uri, range, searchStringSuggested);					//replace the original code with the suggested one
 				await vscode.workspace.applyEdit(edit);
 
 				// After applying, briefly highlight the newly inserted lines green,
 				// then clear all decorations so the editor goes back to normal.
 				const newStartPos = editor.document.positionAt(index);
-				const newEndPos = editor.document.positionAt(index + message.suggested.length);
+				const newEndPos = editor.document.positionAt(index + searchStringSuggested.length);
 				const newRange = new vscode.Range(newStartPos, newEndPos);
+				
 				editor.setDecorations(this._removedDecoration, []);
 				editor.setDecorations(this._addedDecoration, [newRange]);
 				editor.revealRange(newRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
