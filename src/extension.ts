@@ -21,6 +21,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 	public revealGuideline(title: string) { //function that can be called from other parts of the code to update the content of the documentation view
 		if (this._view) {
 			this._view.show?.(true); // Show the view if it's not visible, but don't take focus
+			console.log('revealGuideline called with:', title); // DEBUG
 			this._view.webview.postMessage({ command: 'revealGuideline', title: title.toLowerCase() }); //send a message to the webview to reveal the guideline with the given title
 		}
 	}
@@ -83,7 +84,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 		}
 
 		const htmlContent = sections.map(s => ` 		<!-- each sections become a HTML string -->
-    	<details class="guideline-card" data-title="${s.title.toLowerCase()}">		<!-- data-title is an hidden attribute, toLowercase is useful for the search-bar -->
+    	<details class="guideline-card" data-title="${s.title.toLowerCase().replace(/['"]/g, '')}">		<!-- data-title is an hidden attribute, toLowercase is useful for the search-bar -->
         <summary class="guideline-header">${s.title}</summary>
         <div class="guideline-body">${s.html.replace(/<details[^>]*>[\s\S]*?<\/summary>/g, '').replace(/<\/details>/g, '')}</div> 
     	</details>		
@@ -113,7 +114,8 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 			console.log('revealGuideline ricevuto:', query);
             cards.forEach(card => {											
                 const title = card.getAttribute('data-title');				//Takes the title of the card
-                if (title.includes(query)) {								//if the title contains the input of the search-bar the card remains visible, otherwise is hidden
+				const body = card.querySelector('.guideline-body').textContent.toLowerCase();
+				if (title.includes(query) || body.includes(query)) {
                     card.style.display = '';
                 } else {
                     card.style.display = 'none';
@@ -133,9 +135,14 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
 			
 			cards.forEach(card => {
 				const title = card.getAttribute('data-title');
-				const queryWords = query.split(' ').filter(w => w.length > 0); //split the query in words, if title contains all the words of the query, the card is opened
-				const queryMatch = queryWords.every(word => title.includes(word)); //if all the query is contained in the title, match is true
-				if (title.includes(query) || query.includes(title) || queryMatch) {	
+				const normalize = s => s.toLowerCase().replace(/['"]/g, '').trim();
+				const q = normalize(query);
+				const t = normalize(title);
+				const queryMatch = q === t ||
+								t.includes(q) ||
+								q.includes(t) ||
+								(q.split(' ').length > 1 && q.split(' ').every(w => t.includes(w)));
+				if (queryMatch) {	
 					card.open = true;
 					card.scrollIntoView({ behavior: 'smooth', block: 'start' }); //scrolls the card
 					card.style.transition = '';
@@ -363,7 +370,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     			}
 
 				const startPos = document.positionAt(index);                              //Converts numerical index in a position in the document (line and column)
-				const endPos = document.positionAt(index + message.original.length);
+				const endPos = document.positionAt(index + searchStringOriginal.length);
 				const range = new vscode.Range(startPos, endPos);						  //piece of text to substitute
 				const edit = new vscode.WorkspaceEdit();
 
@@ -503,7 +510,6 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 			}); // chiude il forEach
 		
 		} else if (message.command === 'suggestionAccepted') {
-			// Hide the Accept button of the card that was just applied
 			const card = document.getElementById(message.cardId);
 			if (card) {
 				const btn = card.querySelector('.accept-btn');
