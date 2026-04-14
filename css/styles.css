@@ -187,3 +187,19 @@ button:focus {
 #search-bar:focus {
     border-color: #0066cc;
 }
+
+.undo-btn {
+    background-color: #8b0000;
+    color: white;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: 8px;
+}
+
+.undo-btn:hover {
+    background-color: #a00000;
+    transition: background-color 0.3s ease;
+}
