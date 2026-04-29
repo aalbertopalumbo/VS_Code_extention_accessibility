@@ -13,7 +13,8 @@
     "onCommand:accessibility-assistant.helloWorld",
     "onView:documentation",
     "onView:analysis",
-    "onView:testing"
+    "onView:testing",
+    "onView:conweb"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -44,6 +45,12 @@
           "id": "testing", 
           "name": "Vocal Testing", 
           "icon": "resources/accessibility-icon.png" 
+        },
+        {
+            "type": "webview",
+            "id": "conweb",
+            "name": "ConWeb Testing",
+            "icon": "resources/accessibility-icon.png"
         }
       ]
     },
