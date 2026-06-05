@@ -1,0 +1,65 @@
+[
+    {
+        "type": "interact",
+        "interact_result": {
+            "user_intent": "describe",
+            "assistant_message": "Sto eseguendo la descrizione della pagina.",
+            "next_actions": [
+                "Posso aiutarti a leggere il testo principale della pagina.",
+                "Vuoi che ti apra una delle sezioni principali come Servizi, Notizie o Amministrazione?",
+                "Posso aiutarti a compilare la barra di ricerca inserendo un termine da cercare."
+            ],
+            "describe_text": "La pagina del Comune di Milano si apre con il logo cliccabile in alto, che funge anche da collegamento alla homepage. Subito sotto è presente una barra di ricerca dove puoi inserire un testo e premere il pulsante \"Cerca\" per trovare informazioni. Segue un menu di navigazione principale con i link: Servizi, Notizie, Amministrazione e un pulsante per espandere la sezione Argomenti.\nNella parte centrale della pagina trovi un annuncio riguardante una mostra storica a Palazzo Marino, con dettagli sugli orari di visita e la possibilità di accedere a una galleria fotografica tramite un link interattivo. Sono presenti anche altri link, come quello per prenotare la visita.\nPiù in basso, c'è una sezione \"Link Utili\" con collegamenti rapidi a enti e servizi come Regione Lombardia, ATS Milano, ATM, Milano Ristorazione e altri. Un'altra sezione offre link per accedere all'area riservata, privacy, note legali e accessibilità.\nInfine, la pagina propone una sezione \"Seguici su\" con link ai canali social del Comune di Milano: Facebook, X (Twitter), YouTube, Instagram, Linkedin e Whatsapp.\nLe principali azioni che puoi compiere sono: utilizzare la barra di ricerca, navigare tra le sezioni tramite i menu, accedere ai link utili o ai social, e gestire le impostazioni cookie tramite un apposito pulsante."
+        }
+    },
+    {
+        "type": "interact",
+        "interact_result": {
+            "user_intent": "read",
+            "assistant_message": "Sto leggendo le notizie presenti nella pagina.",
+            "next_actions": [
+                "Posso aprire il link della Galleria fotografica.",
+                "Posso aprire il link per prenotare la visita all'iniziativa.",
+                "Posso tornare al menu principale o leggere altre sezioni della pagina."
+            ],
+            "read_text": "Ecco le notizie presenti nella pagina:\n- Nell'ottantesimo anno della Repubblica, esposto nell'emiciclo di Palazzo Marino anche un baule in legno utilizzato per la raccolta delle schede in uno dei seggi della consultazione referendaria. Ingresso libero su prenotazione nei pomeriggi feriali, dalle 14:30 alle 17.\n- Galleria fotografica (link interattivo)\n- Milano, 20 aprile 2026\nManifesti e documenti delle prime elezioni amministrative milanesi del Dopoguerra, che rappresentarono il primo voto delle donne, e della campagna per il referendum istituzionale del 1946 esposti in Aula consiliare a Palazzo Marino.\n- Nell'ottantesimo anno della Repubblica, in Consiglio comunale viene allestita una raccolta di materiali contenuti nella Cittadella degli Archivi su due momenti decisivi per Milano e per l'Italia."
+        }
+    },
+    {
+        "type": "interact",
+        "interact_result": {
+            "user_intent": "navigate",
+            "assistant_message": "Sto aprendo la pagina relativa alla carta d'identità come richiesto.",
+            "html_link_id": "node_446",
+            "query_selector": "#fragment-e5b91b96-f8d6-1de8-9dd3-8c22c31d0f3c > DIV:nth-child(1) > DIV:nth-child(1) > DIV:nth-child(1) > H3:nth-child(1) > A:nth-child(1)"
+        }
+    },
+    {
+        "type": "interact",
+        "interact_result": {
+            "user_intent": "fill",
+            "assistant_message": "Sto inserendo il nome \"Andrea\" e il cognome \"Rossi\" nei campi corrispondenti.",
+            "next_actions": [
+                "Posso inserire il Codice Fiscale dell'intestatario (campo obbligatorio, testo).",
+                "Posso inserire il numero di telefono o cellulare dell'intestatario (campo obbligatorio, solo cifre).",
+                "Posso inserire l'indirizzo email dell'intestatario (campo obbligatorio, formato email valido)."
+            ],
+            "form_info": {
+                "form_name": "Richiesta pass per la sosta e la circolazione di persone con disabilità (CUDE - art. 381 DPR 495/1992) - Simulazione IA",
+                "form_html": "",
+                "fields_list": [
+                    { "cnt_id": "node_122", "input_html": "", "label_name": "Nome *", "query_selector": "#S_5762_NEW_COL0001", "user_value": "Andrea" },
+                    { "cnt_id": "node_137", "input_html": "", "label_name": "Cognome *", "query_selector": "#S_5762_NEW_COL0002", "user_value": "Rossi" },
+                    { "cnt_id": "node_152", "input_html": "", "label_name": "Codice Fiscale *", "query_selector": "#S_5762_NEW_COL0003", "user_value": null },
+                    { "cnt_id": "node_180", "input_html": "", "label_name": "Telefono/Cellulare *", "query_selector": "#S_5762_NEW_COL0017", "user_value": null },
+                    { "cnt_id": "node_195", "input_html": "", "label_name": "Email *", "query_selector": "#S_5762_NEW_COL0004", "user_value": null },
+                    { "cnt_id": "node_227", "input_html": "", "label_name": "Documento identità FRONTE *", "query_selector": "#S_5762_NEW_COL0027_SID", "user_value": null },
+                    { "cnt_id": "node_244", "input_html": "", "label_name": "Documento identità RETRO *", "query_selector": "#S_5762_NEW_COL0028_SID", "user_value": null },
+                    { "cnt_id": "node_273", "input_html": "", "label_name": "Fotografia fototessera *", "query_selector": "#S_5762_NEW_COL0029_SID", "user_value": null },
+                    { "cnt_id": "node_282", "input_html": "", "label_name": "Salva & Prosegui", "query_selector": "#main > DIV:nth-child(1) > DIV:nth-child(2) > INPUT:nth-child(1)", "user_value": "Salva & Prosegui" },
+                    { "cnt_id": "node_283", "input_html": "", "label_name": "Indietro", "query_selector": "#main > DIV:nth-child(1) > DIV:nth-child(2) > INPUT:nth-child(2)", "user_value": "Indietro" }
+                ]
+            }
+        }
+    }
+]
