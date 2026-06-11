@@ -203,3 +203,18 @@ button:focus {
     background-color: #a00000;
     transition: background-color 0.3s ease;
 }
+
+#cancel-analysis {
+    display: none;
+    background-color: var(--vscode-errorForeground);
+    color: var(--vscode-editor-background);
+}
+
+.sticky-buttons {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: var(--vscode-sideBar-background);
+    padding: 10px 0;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}

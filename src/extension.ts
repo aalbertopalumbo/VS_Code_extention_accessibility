@@ -55,7 +55,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
             const isMarkdownHeading = token.type === 'heading' && token.depth === 3; //heading type token with ### (4-12)
 
             if (isDetailsHeading || isMarkdownHeading) {
-                if (currentTitle != '') {
+                if (currentTitle !== '') {
                     sections.push({
                         title: currentTitle,
                         html: marked.parser(currentTokens as any)
@@ -225,7 +225,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         editor.setDecorations(this._addedDecoration, []);
     }
 
-    private _cancelled = false; // ← flag instead of abortcontroller
+    
 
     private async runGeminiAnalysis(webview: vscode.Webview) {
     if (this._abortController) {
@@ -258,7 +258,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         const genAI = new GoogleGenAI({ apiKey });
 
         const response = await genAI.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: `You are an expert code assistant specialized in conversational web browsing.
             You provide your suggestions based on the documentation provided and nothing else.
             Make is so you can't generate two suggestions overlapping on the same lines.
@@ -289,7 +289,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
             ${code}`
         });
 
-        // ← If the user cancelled gemini response while gemini was answering, ignore the answer
+        // If the user cancelled gemini response while gemini was answering, ignore the answer
         if (this._cancelled) {
             return;
         }
@@ -471,21 +471,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="stylesheet" href="${styleUri}">
         <title>Analysis</title>
-        <style>
-            #cancel-analysis {
-                display: none;
-                background-color: var(--vscode-errorForeground);
-                color: var(--vscode-editor-background);
-            }
-            .sticky-buttons {
-                position: sticky;
-                top: 0;
-                z-index: 10;
-                background-color: var(--vscode-sideBar-background);
-                padding: 10px 0;
-                border-bottom: 1px solid var(--vscode-panel-border);
-            }
-        </style>
+        
     </head>
     <body>
     <div class="container">
@@ -509,7 +495,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
 
-    function resetUIState() {
+    function resetUIState() { 
         clearInterval(_analysisInterval);
         statusEl.textContent = '';
         runBtn.style.display = 'block';
