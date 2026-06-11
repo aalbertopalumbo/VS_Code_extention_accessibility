@@ -55,7 +55,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
             const isMarkdownHeading = token.type === 'heading' && token.depth === 3; //heading type token with ### (4-12)
 
             if (isDetailsHeading || isMarkdownHeading) {
-                if (currentTitle != '') {
+                if (currentTitle !== '') {
                     sections.push({
                         title: currentTitle,
                         html: marked.parser(currentTokens as any)
@@ -225,7 +225,6 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         editor.setDecorations(this._addedDecoration, []);
     }
 
-    private _cancelled = false; // ← flag instead of abortcontroller
 
     private async runGeminiAnalysis(webview: vscode.Webview) {
     if (this._abortController) {
@@ -258,7 +257,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         const genAI = new GoogleGenAI({ apiKey });
 
         const response = await genAI.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: `You are an expert code assistant specialized in conversational web browsing.
             You provide your suggestions based on the documentation provided and nothing else.
             Make is so you can't generate two suggestions overlapping on the same lines.
@@ -289,7 +288,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
             ${code}`
         });
 
-        // ← If the user cancelled gemini response while gemini was answering, ignore the answer
+        // If the user cancelled gemini response while gemini was answering, ignore the answer
         if (this._cancelled) {
             return;
         }
@@ -316,7 +315,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
     } catch (err: any) {
         if (this._cancelled) {
-            return; // ← ignores errors during elimination
+            return; // ignores errors during elimination
         }
         webview.postMessage({ command: 'analysisError', error: err.message });
     } finally {
@@ -347,8 +346,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
             if (message.command === 'cancelAnalysis') {
                 if (this._abortController) {
-                    this._cancelled = true; // ← set the flag
-                    this._abortController = undefined; // ← free the lock
+                    this._cancelled = true; // set the flag
+                    this._abortController = undefined; // free the lock
                     webviewView.webview.postMessage({ command: 'analysisCancelled' });
     }
 }
@@ -497,12 +496,66 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div id="status"></div>
         <div id="results"></div>
+
+		<details class="history-section">
+			<summary>History</summary>
+			<div id="history-list">
+				<em>No actions taken yet.</em>
+			</div>
+		</details>
+
+
     </div>
 
     <script>
     const vscode = acquireVsCodeApi();
     let cardCounter = 0;
     let _analysisInterval;
+
+
+	// Function to append to history
+	function addHistoryEntry(action, title, original, suggested) {
+		const historySection = document.querySelector('.history-section');
+		const historyList = document.getElementById('history-list');
+		
+		if (historyList.querySelector('em')) {
+			historyList.innerHTML = '';
+		}
+		const entry = document.createElement('div');
+		entry.className = 'history-entry';
+
+		const time = new Date().toLocaleTimeString();
+		const actionClass = action === 'Applied' ? 'history-action-accepted' : 'history-action-undone';
+
+		// NEW: Generate the diff HTML just like the main cards do
+		let diffHtml = '';
+		if (original && suggested) {
+			const removedLines = original.split('\\n')
+				.map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>')
+				.join('');
+			const addedLines = suggested.split('\\n')
+				.map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
+				.join('');
+			diffHtml = '<div class="history-diff diff-block">' + removedLines + addedLines + '</div>';
+		}
+
+		if (diffHtml) {
+			entry.innerHTML = '<details class="history-item-details">' +
+							  '<summary class="history-header">' + 
+							  '<span class="history-time">[' + time + ']</span> ' +
+							  '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
+							  '</summary>' + 
+							  diffHtml + 
+							  '</details>';
+		} else {
+			entry.innerHTML = '<div class="history-header">' + 
+							  '<span class="history-time">[' + time + ']</span> ' +
+							  '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
+							  '</div>';
+		}
+		historyList.prepend(entry); // Adds the newest entry to the top
+
+	}
 
     const runBtn = document.getElementById('run-analysis');
     const cancelBtn = document.getElementById('cancel-analysis');
@@ -628,6 +681,12 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                         cardId: message.cardId
                     });
                 });
+
+                
+				// Aggiorna la cronologia
+				const titleEl = card.querySelector('.violation-title');
+				const titleText = titleEl ? titleEl.textContent : 'Code modification';
+				addHistoryEntry('Applied', titleText, message.original, message.suggested);
             }
 
         } else if (message.command === 'suggestionUndone') {
@@ -652,6 +711,11 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                         cardId: message.cardId
                     });
                 });
+
+                // Aggiorna la cronologia
+				const titleEl = card.querySelector('.violation-title');
+				const titleText = titleEl ? titleEl.textContent : 'Code modification';
+				addHistoryEntry('Undone', titleText, message.original, message.suggested);
             }
 
         } else if (message.command === 'analysisError') {
