@@ -177,6 +177,9 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
     public static readonly viewType = 'analysis';
 
+    private _bulkDecorations: vscode.TextEditorDecorationType[] = [];
+    private _clearTimeout?: NodeJS.Timeout;
+    
     private _abortController?: AbortController;
     private _cancelled = false;
 
@@ -201,6 +204,11 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     ) {}
 
     private clearDecorations() {
+        
+        this._bulkDecorations.forEach(deco => deco.dispose());
+        this._bulkDecorations = [];
+
+        
         const editor = vscode.window.activeTextEditor;
         if (editor) {
             editor.setDecorations(this._removedDecoration, []);
@@ -257,7 +265,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         const genAI = new GoogleGenAI({ apiKey });
 
         const response = await genAI.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-2.5-flash',
             contents: `You are an expert code assistant specialized in conversational web browsing.
             You provide your suggestions based on the documentation provided and nothing else.
             Make is so you can't generate two suggestions overlapping on the same lines.
@@ -399,10 +407,24 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 const newStartPos = editor.document.positionAt(index);
                 const newEndPos = editor.document.positionAt(index + searchStringSuggested.length);
                 const newRange = new vscode.Range(newStartPos, newEndPos);
-                editor.setDecorations(this._removedDecoration, []);
-                editor.setDecorations(this._addedDecoration, [newRange]);
-                editor.revealRange(newRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-                setTimeout(() => this.clearDecorations(), 10000);
+                
+                // --- LOGICA ANTI-STROBO BULK ACCEPT ---
+                if (!message.isBulk) {
+                    this.clearDecorations();
+                    editor.setDecorations(this._addedDecoration, [newRange]);
+                    editor.revealRange(newRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+                } else {
+                    const bulkDeco = vscode.window.createTextEditorDecorationType({
+                        backgroundColor: 'rgba(80, 200, 80, 0.25)', isWholeLine: true,
+                        overviewRulerColor: 'rgba(80, 200, 80, 0.8)', overviewRulerLane: vscode.OverviewRulerLane.Right
+                    });
+                    editor.setDecorations(bulkDeco, [newRange]);
+                    this._bulkDecorations.push(bulkDeco);
+                }
+
+                if (this._clearTimeout) { clearTimeout(this._clearTimeout); }
+                this._clearTimeout = setTimeout(() => this.clearDecorations(), 10000);
+                // --------------------------------------
 
                 webviewView.webview.postMessage({
                     command: 'suggestionAccepted',
@@ -444,10 +466,24 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 const restoredStartPos = editor.document.positionAt(index);
                 const restoredEndPos = editor.document.positionAt(index + searchStringOriginal.length);
                 const restoredRange = new vscode.Range(restoredStartPos, restoredEndPos);
-                editor.setDecorations(this._removedDecoration, [restoredRange]);
-                editor.setDecorations(this._addedDecoration, []);
-                editor.revealRange(restoredRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-                setTimeout(() => this.clearDecorations(), 10000);
+                
+                // --- LOGICA ANTI-STROBO BULK UNDO ---
+                if (!message.isBulk) {
+                    this.clearDecorations();
+                    editor.setDecorations(this._removedDecoration, [restoredRange]);
+                    editor.revealRange(restoredRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+                } else {
+                    const bulkDeco = vscode.window.createTextEditorDecorationType({
+                        backgroundColor: 'rgba(255, 80, 80, 0.25)', isWholeLine: true,
+                        overviewRulerColor: 'rgba(255, 80, 80, 0.8)', overviewRulerLane: vscode.OverviewRulerLane.Right
+                    });
+                    editor.setDecorations(bulkDeco, [restoredRange]);
+                    this._bulkDecorations.push(bulkDeco);
+                }
+
+                if (this._clearTimeout) { clearTimeout(this._clearTimeout); }
+                this._clearTimeout = setTimeout(() => this.clearDecorations(), 10000);
+                // ------------------------------------
 
                 webviewView.webview.postMessage({
                     command: 'suggestionUndone',
@@ -479,6 +515,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         <div class="sticky-buttons" style="display: flex; gap: 10px;">
             <button id="run-analysis">Run Analysis</button>
             <button id="cancel-analysis">Cancel</button>
+            <button id="accept-all" style="display: none;">Accept All</button>
+            <button id="undo-all" style="display: none;">Undo All</button>
         </div>
         <div id="status"></div>
         <div id="results"></div>
@@ -497,54 +535,53 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     const vscode = acquireVsCodeApi();
     let cardCounter = 0;
     let _analysisInterval;
+    let isBulkMode = false;
 
+    function addHistoryEntry(action, title, original, suggested) {
+        const historySection = document.querySelector('.history-section');
+        const historyList = document.getElementById('history-list');
+        
+        if (historyList.querySelector('em')) {
+            historyList.innerHTML = '';
+        }
+        const entry = document.createElement('div');
+        entry.className = 'history-entry';
 
-	// Function to append to history
-	function addHistoryEntry(action, title, original, suggested) {
-		const historySection = document.querySelector('.history-section');
-		const historyList = document.getElementById('history-list');
-		
-		if (historyList.querySelector('em')) {
-			historyList.innerHTML = '';
-		}
-		const entry = document.createElement('div');
-		entry.className = 'history-entry';
+        const time = new Date().toLocaleTimeString();
+        const actionClass = action === 'Applied' ? 'history-action-accepted' : 'history-action-undone';
 
-		const time = new Date().toLocaleTimeString();
-		const actionClass = action === 'Applied' ? 'history-action-accepted' : 'history-action-undone';
+        let diffHtml = '';
+        if (original && suggested) {
+            const removedLines = original.split('\\n')
+                .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>')
+                .join('');
+            const addedLines = suggested.split('\\n')
+                .map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
+                .join('');
+            diffHtml = '<div class="history-diff diff-block">' + removedLines + addedLines + '</div>';
+        }
 
-		// NEW: Generate the diff HTML just like the main cards do
-		let diffHtml = '';
-		if (original && suggested) {
-			const removedLines = original.split('\\n')
-				.map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>')
-				.join('');
-			const addedLines = suggested.split('\\n')
-				.map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
-				.join('');
-			diffHtml = '<div class="history-diff diff-block">' + removedLines + addedLines + '</div>';
-		}
-
-		if (diffHtml) {
-			entry.innerHTML = '<details class="history-item-details">' +
-							  '<summary class="history-header">' + 
-							  '<span class="history-time">[' + time + ']</span> ' +
-							  '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
-							  '</summary>' + 
-							  diffHtml + 
-							  '</details>';
-		} else {
-			entry.innerHTML = '<div class="history-header">' + 
-							  '<span class="history-time">[' + time + ']</span> ' +
-							  '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
-							  '</div>';
-		}
-		historyList.prepend(entry); // Adds the newest entry to the top
-
-	}
+        if (diffHtml) {
+            entry.innerHTML = '<details class="history-item-details">' +
+                              '<summary class="history-header">' + 
+                              '<span class="history-time">[' + time + ']</span> ' +
+                              '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
+                              '</summary>' + 
+                              diffHtml + 
+                              '</details>';
+        } else {
+            entry.innerHTML = '<div class="history-header">' + 
+                              '<span class="history-time">[' + time + ']</span> ' +
+                              '<span class="' + actionClass + '">' + action + '</span>: ' + escHtml(title) +
+                              '</div>';
+        }
+        historyList.prepend(entry);
+    }
 
     const runBtn = document.getElementById('run-analysis');
     const cancelBtn = document.getElementById('cancel-analysis');
+    const acceptAllBtn = document.getElementById('accept-all');
+    const undoAllBtn = document.getElementById('undo-all');
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
 
@@ -553,6 +590,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         statusEl.textContent = '';
         runBtn.style.display = 'block';
         cancelBtn.style.display = 'none';
+        acceptAllBtn.style.display = 'none';
+        undoAllBtn.style.display = 'none';
     }
 
     runBtn.addEventListener('click', () => {
@@ -576,6 +615,30 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         statusEl.textContent = 'Cancelling...';
     });
 
+    acceptAllBtn.addEventListener('click', async () => {
+        isBulkMode = true;
+        const acceptButtons = document.querySelectorAll('.accept-btn');
+        for (let i = 0; i < acceptButtons.length; i++) {
+            acceptButtons[i].click();
+            await new Promise(r => setTimeout(r, 150));
+        }
+        isBulkMode = false;
+        acceptAllBtn.style.display = 'none';
+        undoAllBtn.style.display = 'block';
+    });
+
+    undoAllBtn.addEventListener('click', async () => {
+        isBulkMode = true;
+        const undoButtons = document.querySelectorAll('.undo-btn');
+        for (let i = 0; i < undoButtons.length; i++) {
+            undoButtons[i].click();
+            await new Promise(r => setTimeout(r, 150));
+        }
+        isBulkMode = false;
+        undoAllBtn.style.display = 'none';
+        acceptAllBtn.style.display = 'block';
+    });
+
     window.addEventListener('message', event => {
         const message = event.data;
 
@@ -589,25 +652,27 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (message.command === 'analysisResult') {
-            if (!message.violations || message.violations.length === 0) {  //if the message doesn't contain any violations or the size is zero
+            if (!message.violations || message.violations.length === 0) {
                 resultsEl.innerHTML = '<p>No violations found!</p>';
                 return;
             }
 
-            message.violations.forEach(v => {   //Build a card for each violation
+            const countHeader = document.createElement('h3');
+            countHeader.className = 'violations-count-header';
+            countHeader.textContent = message.violations.length + (message.violations.length === 1 ? ' violation found' : ' violations found');
+            resultsEl.appendChild(countHeader);
+
+            message.violations.forEach(v => {
                 const cardId = 'card-' + (cardCounter++);
                 const card = document.createElement('div');
                 card.className = 'violation-card';
                 card.id = cardId;
 
                 const removedLines = v.original.split('\\n')
-                    .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>') //
-                    .join('');
+                    .map(line => '<span class="diff-removed">- ' + escHtml(line) + '</span>').join('');
                 const addedLines = v.suggested.split('\\n')
-                    .map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>')
-                    .join('');
+                    .map(line => '<span class="diff-added">+ ' + escHtml(line) + '</span>').join('');
                 
-                //compose each card with title, rationale and diff
                 card.innerHTML =
                     '<div class="violation-label">Rule Violated</div>' +
                     '<div class="violation-title" style="cursor: pointer; color: var(--vscode-textLink-foreground); text-decoration: underline;" title="Click to open documentation">' + escHtml(v.title) + '</div>' +
@@ -637,10 +702,16 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                         command: 'acceptSuggestion',
                         original: v.original,
                         suggested: v.suggested,
-                        cardId: cardId
+                        cardId: cardId,
+                        isBulk: isBulkMode
                     });
                 });
             });
+
+            if (message.violations.length > 0) {
+                acceptAllBtn.style.display = 'block';
+                undoAllBtn.style.display = 'none';
+            }
 
         } else if (message.command === 'suggestionAccepted') {
             const card = document.getElementById(message.cardId);
@@ -664,15 +735,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                         command: 'undoSuggestion',
                         original: message.original,
                         suggested: message.suggested,
-                        cardId: message.cardId
+                        cardId: message.cardId,
+                        isBulk: isBulkMode
                     });
                 });
 
-                
-				// Aggiorna la cronologia
-				const titleEl = card.querySelector('.violation-title');
-				const titleText = titleEl ? titleEl.textContent : 'Code modification';
-				addHistoryEntry('Applied', titleText, message.original, message.suggested);
+                const titleEl = card.querySelector('.violation-title');
+                const titleText = titleEl ? titleEl.textContent : 'Code modification';
+                addHistoryEntry('Applied', titleText, message.original, message.suggested);
             }
 
         } else if (message.command === 'suggestionUndone') {
@@ -694,14 +764,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                         command: 'acceptSuggestion',
                         original: message.original,
                         suggested: message.suggested,
-                        cardId: message.cardId
+                        cardId: message.cardId,
+                        isBulk: isBulkMode
                     });
                 });
 
-                // Aggiorna la cronologia
-				const titleEl = card.querySelector('.violation-title');
-				const titleText = titleEl ? titleEl.textContent : 'Code modification';
-				addHistoryEntry('Undone', titleText, message.original, message.suggested);
+                const titleEl = card.querySelector('.violation-title');
+                const titleText = titleEl ? titleEl.textContent : 'Code modification';
+                addHistoryEntry('Undone', titleText, message.original, message.suggested);
             }
 
         } else if (message.command === 'analysisError') {
@@ -709,14 +779,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         }
     });
 
-    function escHtml(str) { //useful in order to substitute special characters into their safe equivalents
+    function escHtml(str) { 
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
     }
-</script>
+    </script>
     </body>
     </html>`;
     
