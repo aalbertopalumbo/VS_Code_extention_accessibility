@@ -276,3 +276,29 @@ button:focus {
     display: inline-block; /* Keeps the text aligned with the arrow */
 }
 
+
+
+#accept-all {
+    background-color: #2ea043;
+}
+
+#accept-all:hover {
+    background-color: #3fb950;
+}
+
+#undo-all {
+    background-color: #8b0000;
+}
+
+#undo-all:hover {
+    background-color: #a00000;
+}
+
+.violations-count-header {
+    color: #ffffff;
+    font-size: 16px;
+    margin-top: 5px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #444; /* Crea una riga sottile sotto il testo */
+}
