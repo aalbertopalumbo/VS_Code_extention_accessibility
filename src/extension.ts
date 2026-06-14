@@ -1,13 +1,18 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+// Main file of the Accessibility Assistant extension.
+// It adds two panels to the editor sidebar:
+//   "Documentation": shows the accessibility guidelines as searchable cards.
+//   "Analysis": sends the open HTML file to the Gemini AI model, lists the
+//   violations it finds and lets the user apply or undo each fix
+
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as dotenv from 'dotenv';
-// Import marked for markdown parsing
+import * as dotenv from 'dotenv'; // loads the Gemini API key from a .env file
 
 
-// WEBVIEW PROVIDER FOR DOCUMENTATION VIEW
+// The "Documentation" panel: reads the guidelines from a Markdown file and
+// shows them as collapsible, searchable cards. It can also open and highlight
+// one specific guideline when the Analysis panel asks for it
 class DocumentationViewProvider implements vscode.WebviewViewProvider {
 
     public static readonly viewType = 'documentation';
@@ -17,6 +22,9 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
         console.log('DocumentationViewProvider initialized with extension URI:'); //DEBUG
     }
 
+    // Brings the Documentation panel to the front and tells its web page to
+    // open and highlight the guideline whose title is passed in. Called when
+    // the user clicks a violation in the Analysis panel
     public revealGuideline(title: string) {
         if (this._view) {
             this._view.show?.(true);
@@ -24,7 +32,9 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    // This method is called when the webview view is resolved
+    // Builds the panel's content the first time it is opened. It reads the
+    // Markdown guidelines file, splits it into one section per guideline,
+    // converts each section to HTML, and renders them as collapsible cards
     public async resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
@@ -92,8 +102,11 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
         console.log('Documentation view resolved');
     }
 
+    // Returns the full HTML page of the Documentation panel. It embeds the
+    // guideline cards plus a small script that powers the live search box and
+    // reacts to the "revealGuideline" message coming from the Analysis panel
     private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri, htmlContent: string): string {
-    
+
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -113,7 +126,7 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
             cards.forEach(card => {                                         
                 const title = card.getAttribute('data-title');              //Takes the title of the card
                 const body = card.querySelector('.guideline-body').textContent.toLowerCase();
-                if (title.includes(query) || body.includes(query)) {                                //if the title contains the input of the search-bar the card remains visible, otherwise is hidden
+                if (title.includes(query) || body.includes(query)) {        //if the title contains the input of the search-bar the card remains visible, otherwise is hidden
                     card.style.display = '';
                 } else {
                     card.style.display = 'none';
@@ -172,17 +185,23 @@ class DocumentationViewProvider implements vscode.WebviewViewProvider {
     }
 }
 
-// WEBVIEW PROVIDER FOR ANALYSIS VIEW
+// The "Analysis" panel: sends the open HTML file to Gemini with the guidelines, shows the violations it returns as cards, and applies or undoes
+// the suggested fixes in the editor
 class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
     public static readonly viewType = 'analysis';
 
+    // Extra highlights created during an "Accept All"/"Undo All" run, plus the timer that clears every highlight after a few seconds
     private _bulkDecorations: vscode.TextEditorDecorationType[] = [];
     private _clearTimeout?: NodeJS.Timeout;
-    
+
+    // Concurrency guards for an analysis in progress:
+    //  _abortController acts as a "lock": while it exists, a new
+    //  analysis cannot start. _cancelled is raised when the user cancels, so a late reply from Gemini can be ignored
     private _abortController?: AbortController;
     private _cancelled = false;
 
+    // Visual style used to mark removed/original lines in the editor
     private readonly _removedDecoration = vscode.window.createTextEditorDecorationType({
         backgroundColor: 'rgba(255, 80, 80, 0.25)',
         isWholeLine: true,
@@ -190,6 +209,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         overviewRulerLane: vscode.OverviewRulerLane.Right,
     });
 
+    // Visual style used to mark added/applied lines in the editor
     private readonly _addedDecoration = vscode.window.createTextEditorDecorationType({
         backgroundColor: 'rgba(80, 200, 80, 0.25)',
         isWholeLine: true,
@@ -203,12 +223,11 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         private readonly _docProvider: DocumentationViewProvider
     ) {}
 
+    // Removes every highlight from the editor
     private clearDecorations() {
-        
         this._bulkDecorations.forEach(deco => deco.dispose());
         this._bulkDecorations = [];
 
-        
         const editor = vscode.window.activeTextEditor;
         if (editor) {
             editor.setDecorations(this._removedDecoration, []);
@@ -216,6 +235,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    // Finds the given snippet in the active file, scrolls to it and paints it red
+    // Used to preview the violation the user is hovering
     private highlightOriginal(original: string) {
         const editor = vscode.window.activeTextEditor;
         if (!editor) { return; }
@@ -234,13 +255,16 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     }
 
 
+    // Runs one analysis: it locks so two can't run at once, checks the API key and that a file is open, sends the file plus the guidelines to Gemini
+    // asking for a JSON list of violations, then parses that list and hands it to the panel. If the user cancels in the meantime, the reply is thrown away
     private async runGeminiAnalysis(webview: vscode.Webview) {
+    // If a lock is already held, an analysis is in progress: do nothing
     if (this._abortController) {
         return;
     }
 
-    this._cancelled = false; // ← reset of flag
-    this._abortController = new AbortController(); // we keep it only for the "lock"
+    this._cancelled = false;   // reset the cancel flag
+    this._abortController = new AbortController();   // acquire the lock
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -256,6 +280,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         return;
     }
 
+    // Gather the two inputs for the model: the code to analyse and the guidelines
     const code = editor.document.getText();
     const docPath = vscode.Uri.joinPath(this._extensionUri, 'css', 'Web_Design_guidelines.md');
     const documentation = fs.readFileSync(docPath.fsPath, 'utf-8');
@@ -264,6 +289,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         const { GoogleGenAI } = await import('@google/genai');
         const genAI = new GoogleGenAI({ apiKey });
 
+        // Ask Gemini to return only a JSON array of violations following a schema
+        // The "original" field must be copied literally, otherwise the text replacement in the editor won't find it
         const response = await genAI.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: `You are an expert code assistant specialized in conversational web browsing.
@@ -301,6 +328,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        // Keep only the JSON array, from the first '[' to the last ']'. This tolerates extra text or markdown fences the model may add around it
         const text = (response.text || '').trim();
         const start = text.indexOf('[');
         const end = text.lastIndexOf(']');
@@ -310,6 +338,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         }
         const clean = text.slice(start, end + 1);
 
+        // Parse the JSON, on any failure fall back to "no violations"
         let violations = [];
         try {
             violations = JSON.parse(clean);
@@ -322,15 +351,18 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         webview.postMessage({ command: 'analysisResult', violations });
 
     } catch (err: any) {
+        // If the user cancelled, the error is expected: stay silent
         if (this._cancelled) {
-            return; // ignores errors during elimination
+            return;
         }
         webview.postMessage({ command: 'analysisError', error: err.message });
     } finally {
-        this._abortController = undefined;
+        this._abortController = undefined; // release the lock in every case
     }
 }
 
+    // Builds the Analysis panel's page and wires up the messages it sends back
+    // The handler is the single entry point for every user action in the panel (run, cancel, hover, accept, undo, open guideline)
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
@@ -346,20 +378,23 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this.getWebviewContent(webviewView.webview, styleUri);
         console.log('Analysis view resolved');
 
-        // Listen for messages coming from the webview
+        // Sends the messages sent by the panel's web page
         webviewView.webview.onDidReceiveMessage(async (message) => {
+            // "Run Analysis" button: start a new Gemini analysis
             if (message.command === 'runAnalysis') {
                 await this.runGeminiAnalysis(webviewView.webview);
             }
 
+            // "Cancel" button: raise the cancel flag, release the lock and tell the panel to reset
             if (message.command === 'cancelAnalysis') {
                 if (this._abortController) {
-                    this._cancelled = true; // set the flag
-                    this._abortController = undefined; // free the lock
+                    this._cancelled = true;
+                    this._abortController = undefined;
                     webviewView.webview.postMessage({ command: 'analysisCancelled' });
     }
 }
 
+            // Mouse hovers on a violation card: highlight that snippet in the editor
             if (message.command === 'highlightOriginal') {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) { return; }
@@ -369,14 +404,17 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 this.highlightOriginal(original);
             }
 
+            // Mouse leaves a card: remove the highlight
             if (message.command === 'clearHighlight') {
                 this.clearDecorations();
             }
 
+            // Click on a violation title: ask the Documentation panel to open it
             if (message.command === 'revealGuideline') {
                 this._docProvider.revealGuideline(message.title);
             }
 
+            // "Accept": replace the original snippet with the suggested one in the editor, then briefly highlight the inserted lines in green
             if (message.command === 'acceptSuggestion') {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) { return; }
@@ -391,12 +429,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 let searchStringSuggested = message.suggested.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
                 searchStringSuggested = searchStringSuggested.replace(/\r?\n/g, eol);
 
+                // Locate the snippet to replace, abort if it is not found exactly
                 const index = fullText.indexOf(searchStringOriginal);
                 if (index === -1) {
                     vscode.window.showErrorMessage('Could not find the original code in the file.');
                     return;
                 }
 
+                // Replace that text range with the suggested code
                 const startPos = document.positionAt(index);
                 const endPos = document.positionAt(index + searchStringOriginal.length);
                 const range = new vscode.Range(startPos, endPos);
@@ -407,8 +447,9 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 const newStartPos = editor.document.positionAt(index);
                 const newEndPos = editor.document.positionAt(index + searchStringSuggested.length);
                 const newRange = new vscode.Range(newStartPos, newEndPos);
-                
-                // --- LOGICA ANTI-STROBO BULK ACCEPT ---
+
+                // For a single Accept we scroll to the change and highlight it
+                // (doesn't work in Accept All because it would make a mess)
                 if (!message.isBulk) {
                     this.clearDecorations();
                     editor.setDecorations(this._addedDecoration, [newRange]);
@@ -422,9 +463,10 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                     this._bulkDecorations.push(bulkDeco);
                 }
 
+                // Keep the highlights visible for 10s, restarting the timer on
+                // each new change so they all disappear at the same moment
                 if (this._clearTimeout) { clearTimeout(this._clearTimeout); }
                 this._clearTimeout = setTimeout(() => this.clearDecorations(), 10000);
-                // --------------------------------------
 
                 webviewView.webview.postMessage({
                     command: 'suggestionAccepted',
@@ -436,6 +478,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 vscode.window.showInformationMessage('Substitution applied successfully!');
             }
 
+            // "Undo": it finds the suggested code currently in the file and puts the original snippet back
             if (message.command === 'undoSuggestion') {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) { return; }
@@ -466,8 +509,9 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 const restoredStartPos = editor.document.positionAt(index);
                 const restoredEndPos = editor.document.positionAt(index + searchStringOriginal.length);
                 const restoredRange = new vscode.Range(restoredStartPos, restoredEndPos);
-                
-                // --- LOGICA ANTI-STROBO BULK UNDO ---
+
+                // Same as Accept: scroll and highlight for a single Undo,
+                // but doen't scroll in undo all
                 if (!message.isBulk) {
                     this.clearDecorations();
                     editor.setDecorations(this._removedDecoration, [restoredRange]);
@@ -483,7 +527,6 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
                 if (this._clearTimeout) { clearTimeout(this._clearTimeout); }
                 this._clearTimeout = setTimeout(() => this.clearDecorations(), 10000);
-                // ------------------------------------
 
                 webviewView.webview.postMessage({
                     command: 'suggestionUndone',
@@ -497,8 +540,10 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    // Returns the full HTML page of the Analysis panel: the Run/Cancel buttons,
+    // the results area, the History section, and the script that builds the violation cards and reacts to the backend's messages
     private getWebviewContent(webview: vscode.Webview, styleUri: vscode.Uri): string {
-    
+
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -532,11 +577,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     </div>
 
     <script>
+    // This script runs inside the panel's web page. It cannot access the editor
+    // directly: it asks the extension to act by calling vscode.postMessage(...) and updates the UI when the extension answers
     const vscode = acquireVsCodeApi();
-    let cardCounter = 0;
-    let _analysisInterval;
-    let isBulkMode = false;
+    let cardCounter = 0;       // gives each violation card a unique id
+    let _analysisInterval;     // timer for the animated "Running analysis..." dots
+    let isBulkMode = false;    // true while an "Accept All"/"Undo All" run is going
 
+    // Adds one entry (with its diff) to the History section, newest on top.
     function addHistoryEntry(action, title, original, suggested) {
         const historySection = document.querySelector('.history-section');
         const historyList = document.getElementById('history-list');
@@ -585,7 +633,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
 
-    function resetUIState() { 
+    // Brings the UI back to idle: stop the animation, show "Run", hide "Cancel"
+    function resetUIState() {
         clearInterval(_analysisInterval);
         statusEl.textContent = '';
         runBtn.style.display = 'block';
@@ -594,6 +643,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         undoAllBtn.style.display = 'none';
     }
 
+    // "Run Analysis" click: clear old results, animate the status text and ask the extension to start the analysis
     runBtn.addEventListener('click', () => {
         resultsEl.innerHTML = '';
         
@@ -615,6 +665,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         statusEl.textContent = 'Cancelling...';
     });
 
+    // "Accept All": click every card's Accept button one after another. isBulkMode tells the backend not to scroll on each fix
+    // when done we switch to the "Undo All" button
     acceptAllBtn.addEventListener('click', async () => {
         isBulkMode = true;
         const acceptButtons = document.querySelectorAll('.accept-btn');
@@ -627,6 +679,7 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         undoAllBtn.style.display = 'block';
     });
 
+    // "Undo All": the same in reverse, reverting every applied suggestion
     undoAllBtn.addEventListener('click', async () => {
         isBulkMode = true;
         const undoButtons = document.querySelectorAll('.undo-btn');
@@ -639,9 +692,11 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         acceptAllBtn.style.display = 'block';
     });
 
+    // Reacts to the messages sent back by the extension and updates the UI
     window.addEventListener('message', event => {
         const message = event.data;
 
+        // These three outcomes all end an analysis, so reset the buttons first
         if (['analysisResult', 'analysisError', 'analysisCancelled'].includes(message.command)) {
             resetUIState();
         }
@@ -657,11 +712,13 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
+            // Header with the number of violations found
             const countHeader = document.createElement('h3');
             countHeader.className = 'violations-count-header';
             countHeader.textContent = message.violations.length + (message.violations.length === 1 ? ' violation found' : ' violations found');
             resultsEl.appendChild(countHeader);
 
+            // Build one card per violation: title, rationale, diff and an Accept button
             message.violations.forEach(v => {
                 const cardId = 'card-' + (cardCounter++);
                 const card = document.createElement('div');
@@ -708,11 +765,13 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                 });
             });
 
+            // With at least one violation, offer the bulk "Accept All" action
             if (message.violations.length > 0) {
                 acceptAllBtn.style.display = 'block';
                 undoAllBtn.style.display = 'none';
             }
 
+        // A fix was applied: swap the "Accept" button for an "Applied" badge and an "Undo" button, and log the action in the history
         } else if (message.command === 'suggestionAccepted') {
             const card = document.getElementById(message.cardId);
             if (card) {
@@ -740,11 +799,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                     });
                 });
 
-                const titleEl = card.querySelector('.violation-title');
-                const titleText = titleEl ? titleEl.textContent : 'Code modification';
-                addHistoryEntry('Applied', titleText, message.original, message.suggested);
+                
+				// Update the history
+				const titleEl = card.querySelector('.violation-title');
+				const titleText = titleEl ? titleEl.textContent : 'Code modification';
+				addHistoryEntry('Applied', titleText, message.original, message.suggested);
             }
 
+        // A fix was reverted: remove the badge/Undo and restore the "Accept" button so the suggestion can be applied again
         } else if (message.command === 'suggestionUndone') {
             const card = document.getElementById(message.cardId);
             if (card) {
@@ -769,9 +831,10 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
                     });
                 });
 
-                const titleEl = card.querySelector('.violation-title');
-                const titleText = titleEl ? titleEl.textContent : 'Code modification';
-                addHistoryEntry('Undone', titleText, message.original, message.suggested);
+                // Update the history
+				const titleEl = card.querySelector('.violation-title');
+				const titleText = titleEl ? titleEl.textContent : 'Code modification';
+				addHistoryEntry('Undone', titleText, message.original, message.suggested);
             }
 
         } else if (message.command === 'analysisError') {
@@ -779,7 +842,8 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
         }
     });
 
-    function escHtml(str) { 
+    // Escapes &, <, >, " so text coming from the model can be put into the page safely
+    function escHtml(str) {
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -796,13 +860,14 @@ class AnalysisViewProvider implements vscode.WebviewViewProvider {
 
 
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+// Entry point of the extension, run once by VS Code when it starts up. It loads
+// the API key from the .env file and registers the two sidebar panels so that
+// VS Code can build them when the user opens them.
 export function activate(context: vscode.ExtensionContext) {
 
     dotenv.config({ path: path.join(context.extensionPath, '.env') });
 
-    
+
 
     // Use the console to output diagnostic information (console.log) and errors (console.error)
     // This line of code will only be executed once when your extension is activated
@@ -854,6 +919,7 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('Extension activation complete');
 }
 
+// HTML of the simple welcome page shown by the "Hello World" command
 function getWebviewContent(cssUri: vscode.Uri) {
     return `<!DOCTYPE html>
     <html lang="en">
@@ -882,5 +948,5 @@ function getWebviewContent(cssUri: vscode.Uri) {
 
 
 
-// This method is called when your extension is deactivated
+// Called by VS Code when the extension is shut down. Nothing to clean up here
 export function deactivate() {}
